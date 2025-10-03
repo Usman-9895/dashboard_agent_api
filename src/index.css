@@ -37,6 +37,15 @@ body {
 [data-theme='dark'] .search { background: #0b1220; border-color: #374151; color: #e5e7eb; }
 [data-theme='dark'] .search input { color: #e5e7eb; }
 [data-theme='dark'] .pager-btn { background: #111827; color: #e5e7eb; border-color: #374151; }
+/* Ensure the current page button stands out in dark mode */
+[data-theme='dark'] .pager-btn[aria-current="page"] {
+  background: #1f2937; /* slightly lighter than footer */
+  border-color: #7dd3fc; /* accent border for visibility */
+  color: #e5e7eb;
+}
+/* Hover/focus states for dark mode */
+[data-theme='dark'] .pager-btn:hover { background: #0b1220; }
+[data-theme='dark'] .pager-btn:focus-visible { outline: none; border-color: #7dd3fc; box-shadow: 0 0 0 3px rgba(125,211,252,0.25); }
 /* Stats cards readability in dark mode */
 [data-theme='dark'] .stats .stat-card { background: var(--brand-300); box-shadow: 0 8px 20px rgba(0,0,0,0.35); }
 [data-theme='dark'] .stats .stat-title { color: #0f172a; }

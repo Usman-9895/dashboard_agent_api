@@ -1,26 +1,17 @@
 import { useMemo, useState, useEffect } from 'react'
 import { FaSearch } from 'react-icons/fa'
-
-function generateMockAnnuls(count = 19) {
-  const out = []
-  for (let i = 1; i <= count; i++) {
-    out.push({
-      id: i,
-      date: new Date(2025, 8, (i % 28) + 1, 14, (i * 5) % 60).toLocaleString(),
-      ref: `TX-${String(500 + i).padStart(4, '0')}`,
-      compte: `AC${2000 + i}`,
-      motif: i % 3 === 0 ? 'Doublon' : 'Demande client',
-      statut: 'Annulé',
-    })
-  }
-  return out
-}
+import { TransactionsAPI } from '../apiClient'
+import { toast } from 'react-hot-toast'
 
 export default function Cancel() {
   const [compte, setCompte] = useState('')
   const [transfert, setTransfert] = useState('')
   const [message, setMessage] = useState('')
-  const [items, setItems] = useState(generateMockAnnuls())
+  const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [compteErr, setCompteErr] = useState('')
+  const [refErr, setRefErr] = useState('')
   const [q, setQ] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
@@ -29,10 +20,10 @@ export default function Cancel() {
     const s = q.trim().toLowerCase()
     if (!s) return items
     return items.filter(t =>
-      t.compte.toLowerCase().includes(s) ||
-      t.ref.toLowerCase().includes(s) ||
-      t.motif.toLowerCase().includes(s) ||
-      t.statut.toLowerCase().includes(s)
+      (t.numero_compte || '').toLowerCase().includes(s) ||
+      (t.reference || '').toLowerCase().includes(s) ||
+      (t.cancelReason || '').toLowerCase().includes(s) ||
+      (t.statut || '').toLowerCase().includes(s)
     )
   }, [items, q])
 
@@ -47,30 +38,53 @@ export default function Cancel() {
     setPage(p => Math.min(p, pageCount))
   }, [pageCount])
 
+  // Load annulled transactions
+  const load = async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const data = await TransactionsAPI.list({ statut: 'annule' })
+      setItems(data)
+    } catch (e) {
+      setError(e.message || 'Erreur lors du chargement des annulations')
+    } finally {
+      setLoading(false)
+    }
+  }
+  useEffect(() => { load() }, [])
+
   const isAnnul = (s) => {
     if (!s) return false
     const plain = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     return plain.startsWith('annul')
   }
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault()
-    if (!compte || !transfert) return
-    // Ici tu pourras appeler ton API d'annulation
-    setMessage(`Requête d'annulation envoyée pour le transfert ${transfert} du compte ${compte}.`)
-    const id = items.length ? items[0].id + 1 : 1
-    const record = {
-      id,
-      date: new Date().toLocaleString(),
-      ref: transfert.trim(),
-      compte: compte.trim(),
-      motif: 'Demande client',
-      statut: 'Annulé',
+    const ref = transfert.trim()
+    // Validation personnalisée
+    const refValid = /^TX-[0-9A-Za-z-]+$/.test(ref)
+    const c = (compte || '').trim().toUpperCase()
+    const compteValid = !c || /^AD\d{5}$/i.test(c) || /^AC\d{5}$/i.test(c)
+    const refMsg = refValid ? '' : 'Référence invalide. Format attendu: TX-...'
+    const compteMsg = compteValid ? '' : 'Numéro de compte invalide (ADxxxxx ou ACxxxxx)'
+    setRefErr(refMsg)
+    setCompteErr(compteMsg)
+    if (refMsg || compteMsg) return
+    try {
+      setLoading(true)
+      setMessage('')
+      await TransactionsAPI.cancel(ref, 'Demande client', c || undefined)
+      toast.success('Transfert annulé')
+      setCompte('')
+      setTransfert('')
+      setPage(1)
+      await load()
+    } catch (err) {
+      toast.error(err.message || 'Erreur lors de l\'annulation')
+    } finally {
+      setLoading(false)
     }
-    setItems([record, ...items])
-    setCompte('')
-    setTransfert('')
-    setPage(1)
   }
 
   const prev = () => setPage(p => Math.max(1, p - 1))
@@ -81,24 +95,26 @@ export default function Cancel() {
     <div>
       <section className="form-card">
         <header className="form-card-header">Annuler un transfert</header>
-        <form className="inline-form" onSubmit={submit}>
+        <form className="inline-form" onSubmit={submit} noValidate>
           <label>
             Numéro de compte
             <input
               placeholder="Ex: AC1234"
               value={compte}
-              onChange={e => setCompte(e.target.value)}
-              required
+              onChange={e => { setCompte(e.target.value); if (compteErr) { const v = e.target.value.trim().toUpperCase(); setCompteErr(!v || /^AD\d{5}$/i.test(v) || /^AC\d{5}$/i.test(v) ? '' : 'Numéro de compte invalide (ADxxxxx ou ACxxxxx)') } }}
+              onBlur={() => { const v = (compte||'').trim().toUpperCase(); setCompteErr(!v || /^AD\d{5}$/i.test(v) || /^AC\d{5}$/i.test(v) ? '' : 'Numéro de compte invalide (ADxxxxx ou ACxxxxx)') }}
             />
+            {compteErr && <div className="field-error">{compteErr}</div>}
           </label>
           <label>
             Numéro de transfert
             <input
               placeholder="Ex: TX-0001"
               value={transfert}
-              onChange={e => setTransfert(e.target.value)}
-              required
+              onChange={e => { setTransfert(e.target.value); if (refErr) { const ok = /^TX-[0-9A-Za-z-]+$/.test(e.target.value.trim()); setRefErr(ok ? '' : 'Référence invalide. Format attendu: TX-...') } }}
+              onBlur={() => setRefErr(/^TX-[0-9A-Za-z-]+$/.test((transfert||'').trim()) ? '' : 'Référence invalide. Format attendu: TX-...')}
             />
+            {refErr && <div className="field-error">{refErr}</div>}
           </label>
           <div className="actions-right">
             <button type="submit" className="btn-primary">Annuler le transfert</button>
@@ -127,10 +143,15 @@ export default function Cancel() {
             </div>
           </div>
         </header>
+        {error && (
+          <div style={{ padding: '12px 16px', color: '#7f1d1d', background: '#fecaca' }}>{error}</div>
+        )}
+        {loading ? (
+          <div style={{ padding: '14px 16px' }}>Chargement…</div>
+        ) : (
         <table className="data-table">
           <thead>
             <tr>
-              <th>ID</th>
               <th>Date</th>
               <th>Référence</th>
               <th>Numéro de compte</th>
@@ -139,22 +160,22 @@ export default function Cancel() {
             </tr>
           </thead>
           <tbody>
-              {pageItems.map(t => (
-                <tr key={t.id}>
-                  <td>{t.id}</td>
-                  <td>{t.date}</td>
-                  <td>{t.ref}</td>
-                  <td>{t.compte}</td>
-                  <td>{t.motif}</td>
+              {pageItems.map((t, idx) => (
+                <tr key={t._id || idx}>
+                  <td>{new Date(t.cancelledAt || t.updatedAt || t.createdAt).toLocaleString()}</td>
+                  <td>{t.reference}</td>
+                  <td>{t.numero_compte}</td>
+                  <td>{t.cancelReason || 'Demande client'}</td>
                   <td>
                     {isAnnul(t.statut)
-                      ? <span className="chip danger">{t.statut}</span>
+                      ? <span className="chip danger">Annulé</span>
                       : <span className="chip">{t.statut}</span>}
                   </td>
                 </tr>
               ))}
           </tbody>
         </table>
+        )}
         <footer className="table-footer">
           <span>{page} sur {pageCount}</span>
           <div className="pager-size">
