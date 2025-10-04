@@ -8,7 +8,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "node index.js"
+    "postinstall": "npm --prefix backend ci",
+    "start": "npm --prefix backend start"
   },
   "dependencies": {
     "react": "^19.1.1",
